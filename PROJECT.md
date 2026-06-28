@@ -27,6 +27,21 @@ thin natural-language brain** — it parses intent and selects/falls-back among
 login credentials. It never drives the browser blindly (that would be slow and
 flaky for flows that don't actually change).
 
+**Three roles (who does what):**
+- **Human** — does only what a human must: CAPTCHA, OTP/MFA, or any gated step.
+- **Deterministic engine** (Playwright + flows + `login.ts`) — walks the funnel
+  mechanically, *including automated login where the site allows it*.
+- **LLM** — thin brain only: NL → `{flow, targetStep, params, credentialHint}`
+  and credential-label selection. Never types or clicks.
+
+**Login is per-flow: automatable OR manual.** Some flows have a plain
+username/password form → `login.ts` fills it and auto-falls-back across data-box
+entries. Other flows are **CAPTCHA/MFA-gated** → the step is marked `manual`: the
+engine drives up to the gate, **pauses and hands you the live browser**, you log
+in by hand, then signal continue and the engine resumes to the target. The real
+target app is CAPTCHA/MFA-gated, so the manual gate is a core capability, not
+optional. The two paths coexist; each flow declares which it uses.
+
 ## Non-goals
 
 - The LLM does **not** click through the UI or "reason" about pages at runtime.
@@ -62,7 +77,10 @@ flaky for flows that don't actually change).
 
 1. **Local dev panel** — a small localhost web page (plain HTML + tiny
    Express/Fastify server). One text box for the NL command, a log/status stream
-   (Server-Sent Events) so you can watch progress. This is only the command surface.
+   (Server-Sent Events) so you can watch progress, a **Continue** button to resume
+   a paused manual gate (CAPTCHA/MFA), and a **credential prompt** shown when every
+   data-box login fails so you can type a new one and retry. This is the command
+   surface for the human-in-the-loop roles above.
 
 2. **Intent layer (local LLM via Ollama)** — translates NL → a structured plan:
    `{ flow, targetStep, params: { addons: 2, ... }, credentialHint: "premium user" }`.
@@ -82,7 +100,10 @@ flaky for flows that don't actually change).
    browser, executes the flow's steps up to the requested `targetStep`, performs
    login when `requiresAuth`, and **does not close the context** — the dev takes
    over the open window. Session-creating steps go through the real UI/API so URL +
-   cookie + server session all get populated correctly.
+   cookie + server session all get populated correctly. A step may be marked
+   **`manual`**: the engine pauses there, hands the human the live browser, and
+   waits for a **resume** signal (terminal Enter at first, the panel's Continue
+   button once the panel exists) before continuing.
 
 5. **Data box** — a local, **gitignored** vault (e.g. `databox.json`) holding all
    reusable test fixtures, grouped by category and **labeled**, each as a fallback
@@ -155,47 +176,65 @@ TypeScript + Playwright, create the `src/` skeleton.
 `runner/runFlow.ts` launches a headed Chromium to the app URL and **leaves it open**.
 *Verify:* running the script opens the real app in a window that stays open.
 
-**Step 2 — Encode ONE flow, no login, hardcoded data.**
-Record the `internet` flow with `npx playwright codegen`, turn it into a flow
-definition (`flows/internet.ts`) with a `targetSteps` map. Runner walks to a chosen
-target step. (We'll need the dev/staging **app URL** and one set of working data.)
-*Verify:* browser walks the funnel and lands on e.g. `cart` with the cart populated,
+**Step 2 — Encode ONE flow, no login, hardcoded data. ✅ DONE.**
+Encoded against the **saucedemo.com** sandbox (`flows/saucedemo.ts`) instead of the
+real app: att.com is bot-protected (403) and the real staging URL isn't reachable
+from this machine until the work-laptop move. Flow has a `targetSteps` map
+(`cart`, `checkout-address`, `checkout-payment`) and the runner walks to a chosen
+target step.
+*Verified:* browser walks login → add-to-cart → cart, lands on a populated cart,
 window stays open.
 
-**Step 3 — Data box + login (logins only).**
-Add `data/databox.json` (gitignored) with a `logins` fallback list, `data/dataBox.ts`
-helpers, and `auth/login.ts`. Mark the flow `requiresAuth`.
-*Verify:* a flow needing login authenticates and reaches the target. **Fallback test:**
-put a bad login first → runner detects failure and retries with the next entry.
+**Step 3 — Data box + login (logins only). ✅ DONE.**
+Added `data/databox.json` (gitignored), `data/databox.example.json` (committed
+template), `data/dataBox.ts` helpers, and `auth/login.ts` (`loginWithFallback`:
+selectors passed by the flow, fallback logic in the helper). Flow marked
+`requiresAuth`.
+*Verified:* the `locked_out_user` entry (placed first) is rejected → runner logs
+the failure → retries the next entry → logs in as `standard_user` → reaches cart.
 
-**Step 4 — Local web panel (structured command, no LLM yet).**
+**Step 4 — Manual gate: pause / hand-off / resume.**
+The real app's login is CAPTCHA/MFA-gated, so add the human-in-the-loop path. A
+flow step can be marked `manual`; the engine drives up to it, **pauses and hands
+the human the live browser**, and waits for a **resume** signal before continuing
+to the target. Resume comes from the terminal (Enter) for now; the panel's Continue
+button replaces it in Step 5. Automated `login.ts` stays for automatable flows —
+the two coexist. Test on saucedemo by marking *its* login `manual`.
+*Verify:* run the flow → engine opens the browser, pauses with a clear "log in,
+then press Enter / continue" message → human logs in by hand → on resume the engine
+walks to the target (cart) and hands off. Re-run with automated login still works.
+
+**Step 5 — Local web panel (structured command, no LLM yet).**
 `server.ts` (Fastify) serves `public/index.html` with a text box + SSE log stream;
-a `/run` endpoint takes a **structured** command and invokes the runner.
-*Verify:* typing a structured command in the panel runs the flow and streams logs.
+a `/run` endpoint takes a **structured** command and invokes the runner. Add the
+**Continue** button (resumes a paused manual gate) and the **interactive credential
+prompt** shown when every data-box login fails (type a new one → retry).
+*Verify:* typing a structured command in the panel runs the flow and streams logs;
+a manual-gate flow pauses until Continue is clicked; exhausting all logins prompts
+for a new credential and retries with it.
 
-**Step 5 — LLM intent layer.**
+**Step 6 — LLM intent layer.**
 `llm/intent.ts` calls Ollama to turn NL → `{flow, targetStep, params, dataHint}` JSON;
 wire it ahead of `/run`. Keep structured syntax as fallback.
 *Verify:* NL command (e.g. *"take me to internet checkout as a premium user"*) produces
 the right JSON and lands the browser correctly. **LLM-down test:** stop Ollama → the
 structured syntax still works.
 
-**Step 6 — Expand the data box.**
+**Step 7 — Expand the data box.**
 Add `payments`, `addresses`, `identity` categories (test/fake data) and wire them into
 the relevant flow steps; LLM matches labels (e.g. "declined card").
 *Verify:* a flow consumes a payment/address fixture by label.
 
-**Step 7 — Encode remaining flows + target stops.**
+**Step 8 — Encode remaining flows + target stops.**
 Add the other stable flows via codegen + parameterization; expose `cart`,
 `checkout-address`, `checkout-payment` stops.
 *Verify:* each flow runs and each target stop lands on the right page.
 
-**Step 8 (optional / future) — "Record new flow" button in the dev panel.**
+**Step 9 (optional / future) — "Record new flow" button in the dev panel.**
 Add a **Record** button to the dev panel that shells out to
 `npx playwright codegen <url>`, captures the recorded script, and helps save +
 parameterize it into a new `src/flows/*.ts` definition straight from the UI — so
 authoring a new flow doesn't require dropping to the terminal. This is the
-in-app version of the one-time authoring activity used in Steps 2 and 7.
+in-app version of the one-time authoring activity used in Steps 2 and 8.
 *Verify:* clicking **Record** opens the codegen recorder; after recording, the
 generated flow appears as a draft flow definition that can be reviewed and saved.
-```

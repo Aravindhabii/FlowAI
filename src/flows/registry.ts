@@ -1,10 +1,11 @@
 // Step 2 — flow registry. All encoded flows are looked up here by name.
 
 import { type FlowDefinition } from "./types.js";
-import { saucedemoFlow } from "./saucedemo.js";
+import { saucedemoFlow, saucedemoManualFlow } from "./saucedemo.js";
 
 export const flows: Record<string, FlowDefinition> = {
   [saucedemoFlow.name]: saucedemoFlow,
+  [saucedemoManualFlow.name]: saucedemoManualFlow,
 };
 
 export function getFlow(name: string): FlowDefinition {

@@ -18,8 +18,18 @@ export interface FlowStep {
   name: string;
   /** human-readable description for logs. */
   description?: string;
-  /** the action to perform. */
-  run: (ctx: FlowContext) => Promise<void>;
+  /**
+   * Manual (human-in-the-loop) gate: the engine pauses here, hands the open
+   * browser to the human (e.g. to solve a CAPTCHA / log in), and waits for a
+   * resume signal before continuing. Used for CAPTCHA/MFA-gated logins.
+   */
+  manual?: boolean;
+  /**
+   * The action to perform. Optional for a `manual` step (the human acts
+   * instead); when present on a manual step it runs *after* resume — handy for
+   * a post-gate assertion like confirming the expected URL.
+   */
+  run?: (ctx: FlowContext) => Promise<void>;
 }
 
 export interface FlowDefinition {

@@ -5,8 +5,38 @@
 import { chromium, type Browser } from "playwright";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { createInterface } from "node:readline";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { type FlowContext, type FlowDefinition } from "../flows/types.js";
 import { getFlow, listFlows } from "../flows/registry.js";
+
+/** Sentinel file used to resume a paused manual gate when no TTY is attached. */
+const RESUME_FILE = join(process.cwd(), ".flowai-resume");
+
+/**
+ * Block until the human signals they're done with a manual gate. With a TTY,
+ * resume on Enter. Without one (e.g. background run, and later the web panel),
+ * resume when the sentinel file appears. The panel will replace this in Step 5.
+ */
+async function waitForResume(log: (m: string) => void): Promise<void> {
+  if (process.stdin.isTTY) {
+    await new Promise<void>((resolve) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      rl.question("\n>>> Finish in the browser, then press Enter to continue... ", () => {
+        rl.close();
+        resolve();
+      });
+    });
+    return;
+  }
+  rmSync(RESUME_FILE, { force: true }); // clear any stale signal
+  log(`no TTY — to resume, create the file: ${RESUME_FILE}`);
+  while (!existsSync(RESUME_FILE)) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  rmSync(RESUME_FILE, { force: true });
+}
 
 export interface RunFlowOptions {
   flow: FlowDefinition;
@@ -41,7 +71,14 @@ export async function runFlow({
   const ctx: FlowContext = { page, params, log };
   for (const step of flow.steps) {
     log(`step "${step.name}"${step.description ? ` — ${step.description}` : ""}`);
-    await step.run(ctx);
+    if (step.manual) {
+      log(`⏸ manual gate — complete this in the open browser window now.`);
+      await waitForResume(log);
+      log(`▶ resumed`);
+    }
+    if (step.run) {
+      await step.run(ctx);
+    }
     if (step.name === stopAt) {
       log(`reached "${stopAt}" at ${page.url()} — the window is yours. Close it to exit.`);
       break;

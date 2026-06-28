@@ -2,6 +2,9 @@
 node_modules/
 dist/
 
+# manual-gate resume signal (transient)
+.flowai-resume
+
 # data box & auth state hold test secrets — never commit
 src/data/databox.json
 .auth/
