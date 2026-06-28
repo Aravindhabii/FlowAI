@@ -6,11 +6,24 @@
 
 import type { Page } from "playwright";
 
+/** A login credential, e.g. from the data box or typed into the panel. */
+export interface Credential {
+  username: string;
+  password: string;
+  label?: string;
+}
+
 export interface FlowContext {
   page: Page;
   /** values supplied per-run (e.g. { addons: 2 }); wired to NL params later. */
   params: Record<string, string | number | boolean>;
   log: (message: string) => void;
+  /**
+   * Ask the human for a credential when automated logins are exhausted (5c).
+   * Resolves with a typed credential, or null if the human cancels. Absent in
+   * non-interactive contexts (plain CLI), where exhaustion just throws.
+   */
+  requestCredential?: () => Promise<Credential | null>;
 }
 
 export interface FlowStep {

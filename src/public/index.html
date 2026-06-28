@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FlowAI — dev panel</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #0e1116; color: #d7dde5;
+      }
+      header { padding: 16px 20px; border-bottom: 1px solid #21262d; }
+      header h1 { margin: 0; font-size: 16px; }
+      header span { color: #8b949e; font-size: 12px; }
+      main { padding: 20px; max-width: 900px; }
+      form { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+      label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #8b949e; }
+      input, select {
+        background: #161b22; color: #d7dde5; border: 1px solid #30363d;
+        border-radius: 6px; padding: 7px 9px; font: inherit; min-width: 160px;
+      }
+      button {
+        background: #238636; color: #fff; border: 0; border-radius: 6px;
+        padding: 8px 16px; font: inherit; cursor: pointer;
+      }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      button.continue { background: #1f6feb; margin-left: 10px; }
+      .hidden { display: none !important; }
+      #cred-prompt {
+        display: flex; gap: 8px; align-items: center; margin: 12px 0;
+        padding: 10px 12px; border: 1px solid #9e6a03; border-radius: 8px; background: #1b1505;
+      }
+      #cred-prompt span { color: #e3b341; font-size: 12px; }
+      #cred-prompt button { padding: 6px 12px; }
+      #cred-cancel { background: #30363d; }
+      #status { margin: 14px 0 6px; font-size: 13px; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #8b949e; margin-right: 6px; }
+      .dot.run { background: #d29922; } .dot.ok { background: #2ea043; } .dot.err { background: #f85149; }
+      #log {
+        background: #0a0d12; border: 1px solid #21262d; border-radius: 8px;
+        padding: 12px; height: 50vh; overflow: auto; white-space: pre-wrap;
+      }
+      #log .line { padding: 1px 0; }
+      #log .ev { color: #58a6ff; }
+      #log .err { color: #f85149; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>FlowAI <span>— jump to any cart/checkout step</span></h1>
+    </header>
+    <main>
+      <form id="run-form">
+        <label>flow
+          <select id="flow"></select>
+        </label>
+        <label>target step
+          <input id="target" placeholder="cart" value="cart" />
+        </label>
+        <label>credential hint (optional)
+          <input id="hint" placeholder="e.g. standard" />
+        </label>
+        <button id="go" type="submit">Run</button>
+        <button id="continue" type="button" class="continue hidden">Continue ▸</button>
+      </form>
+
+      <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
+
+      <div id="cred-prompt" class="hidden">
+        <span>all logins failed — enter one:</span>
+        <input id="cred-user" placeholder="username" autocomplete="off" />
+        <input id="cred-pass" type="password" placeholder="password" autocomplete="off" />
+        <button id="cred-submit" type="button">Use &amp; retry</button>
+        <button id="cred-cancel" type="button">Cancel</button>
+      </div>
+
+      <div id="log"></div>
+    </main>
+
+    <script>
+      const logEl = document.getElementById("log");
+      const statusText = document.getElementById("status-text");
+      const dot = document.querySelector(".dot");
+      const goBtn = document.getElementById("go");
+      const continueBtn = document.getElementById("continue");
+      const flowSel = document.getElementById("flow");
+      const credPrompt = document.getElementById("cred-prompt");
+      const credUser = document.getElementById("cred-user");
+      const credPass = document.getElementById("cred-pass");
+
+      function hideCredPrompt() { credPrompt.classList.add("hidden"); credUser.value = ""; credPass.value = ""; }
+
+      function append(text, cls) {
+        const div = document.createElement("div");
+        div.className = "line" + (cls ? " " + cls : "");
+        div.textContent = text;
+        logEl.appendChild(div);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+      function setStatus(text, cls) {
+        statusText.textContent = text;
+        dot.className = "dot" + (cls ? " " + cls : "");
+      }
+
+      // Connect the event stream FIRST so we don't miss the opening log lines.
+      const es = new EventSource("/events");
+      es.onopen = () => setStatus("ready", "");
+      es.onerror = () => setStatus("stream disconnected", "err");
+      es.onmessage = (e) => {
+        const ev = JSON.parse(e.data);
+        if (ev.type === "log") append(ev.message);
+        else if (ev.type === "manual-gate") { append("⏸ manual gate at \"" + ev.step + "\" — finish in the browser, then Continue", "ev"); setStatus("waiting for you", "run"); continueBtn.classList.remove("hidden"); continueBtn.disabled = false; }
+        else if (ev.type === "credential-prompt") { append("🔑 " + ev.message, "ev"); setStatus("needs a credential", "run"); credPrompt.classList.remove("hidden"); credUser.focus(); }
+        else if (ev.type === "reached-target") { append("✓ reached \"" + ev.step + "\" → " + ev.url, "ev"); setStatus("reached target", "ok"); goBtn.disabled = false; continueBtn.classList.add("hidden"); hideCredPrompt(); }
+        else if (ev.type === "error") { append("✗ " + ev.message, "err"); setStatus("failed", "err"); goBtn.disabled = false; continueBtn.classList.add("hidden"); hideCredPrompt(); }
+        else if (ev.type === "closed") { append("— browser closed —", "ev"); continueBtn.classList.add("hidden"); hideCredPrompt(); }
+      };
+
+      // Populate flow list.
+      fetch("/flows").then((r) => r.json()).then(({ flows }) => {
+        for (const f of flows) {
+          const o = document.createElement("option");
+          o.value = o.textContent = f;
+          flowSel.appendChild(o);
+        }
+      });
+
+      document.getElementById("cred-submit").addEventListener("click", async () => {
+        const username = credUser.value.trim();
+        const password = credPass.value;
+        if (!username || !password) return;
+        hideCredPrompt();
+        setStatus("retrying with your credential", "run");
+        await fetch("/credential", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, label: "entered" }),
+        });
+      });
+
+      document.getElementById("cred-cancel").addEventListener("click", async () => {
+        hideCredPrompt();
+        await fetch("/credential", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cancel: true }),
+        });
+      });
+
+      continueBtn.addEventListener("click", async () => {
+        continueBtn.disabled = true;
+        setStatus("resuming…", "run");
+        const res = await fetch("/resume", { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          append("✗ " + (err.error || res.statusText), "err");
+          continueBtn.disabled = false;
+        }
+      });
+
+      document.getElementById("run-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        goBtn.disabled = true;
+        setStatus("running", "run");
+        const body = {
+          flow: flowSel.value,
+          targetStep: document.getElementById("target").value.trim() || undefined,
+          credentialHint: document.getElementById("hint").value.trim() || undefined,
+        };
+        const res = await fetch("/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          append("✗ " + (err.error || res.statusText), "err");
+          setStatus("rejected", "err");
+          goBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

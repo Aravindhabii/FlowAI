@@ -28,28 +28,57 @@ export async function loginWithFallback(
   form: LoginForm,
   credentialHint?: string,
 ): Promise<Login> {
-  const { page, log } = ctx;
+  const { log } = ctx;
   const candidates = getLogins(credentialHint);
   const timeout = form.timeoutMs ?? 8000;
 
+  // 1) Try the data-box list in order.
   for (const cred of candidates) {
-    log(`trying login "${cred.label}" (${cred.username})`);
-    await page.fill(form.usernameSelector, cred.username);
-    await page.fill(form.passwordSelector, cred.password);
-    await page.click(form.submitSelector);
+    if (await attempt(ctx, form, cred, timeout)) return cred;
+  }
 
-    if ((await waitForOutcome(page, form, timeout)) === "success") {
-      log(`login succeeded as "${cred.label}"`);
-      return cred;
+  // 2) All exhausted — if the context is interactive (web panel), ask the
+  //    human for a credential and retry until one works or they cancel.
+  if (ctx.requestCredential) {
+    log(`all ${candidates.length} data-box login(s) failed — asking you for one`);
+    for (;;) {
+      const entered = await ctx.requestCredential();
+      if (!entered) break; // human cancelled
+      const cred: Login = {
+        label: entered.label ?? "entered",
+        username: entered.username,
+        password: entered.password,
+      };
+      if (await attempt(ctx, form, cred, timeout)) return cred;
     }
-
-    log(`login failed for "${cred.label}" → trying next credential`);
-    await dismissError(page, form);
   }
 
   throw new Error(
-    `All ${candidates.length} login(s) failed — check src/data/databox.json.`,
+    `All login(s) failed — check src/data/databox.json or enter a working one.`,
   );
+}
+
+// One login attempt: fill, submit, and report whether it succeeded. On failure
+// the rejection is cleared so the next attempt starts clean.
+async function attempt(
+  ctx: FlowContext,
+  form: LoginForm,
+  cred: Login,
+  timeout: number,
+): Promise<boolean> {
+  const { page, log } = ctx;
+  log(`trying login "${cred.label}" (${cred.username})`);
+  await page.fill(form.usernameSelector, cred.username);
+  await page.fill(form.passwordSelector, cred.password);
+  await page.click(form.submitSelector);
+
+  if ((await waitForOutcome(page, form, timeout)) === "success") {
+    log(`login succeeded as "${cred.label}"`);
+    return true;
+  }
+  log(`login failed for "${cred.label}" → trying next credential`);
+  await dismissError(page, form);
+  return false;
 }
 
 // Bounds the wait on a settled state, then asserts state explicitly. Both

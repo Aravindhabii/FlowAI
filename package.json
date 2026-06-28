@@ -7,7 +7,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts",
-    "browser": "tsx src/runner/runFlow.ts"
+    "browser": "tsx src/runner/runFlow.ts",
+    "serve": "tsx src/server.ts",
+    "intent": "tsx src/llm/intent.ts"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
@@ -15,6 +17,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "fastify": "^5.9.0",
     "playwright": "^1.61.1"
   }
 }

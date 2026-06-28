@@ -204,21 +204,39 @@ the two coexist. Test on saucedemo by marking *its* login `manual`.
 then press Enter / continue" message → human logs in by hand → on resume the engine
 walks to the target (cart) and hands off. Re-run with automated login still works.
 
-**Step 5 — Local web panel (structured command, no LLM yet).**
+**Step 5 — Local web panel (structured command, no LLM yet). ✅ DONE.**
 `server.ts` (Fastify) serves `public/index.html` with a text box + SSE log stream;
-a `/run` endpoint takes a **structured** command and invokes the runner. Add the
-**Continue** button (resumes a paused manual gate) and the **interactive credential
-prompt** shown when every data-box login fails (type a new one → retry).
-*Verify:* typing a structured command in the panel runs the flow and streams logs;
-a manual-gate flow pauses until Continue is clicked; exhausting all logins prompts
-for a new credential and retries with it.
+`/run` takes the intent schema `{flow, targetStep, params, credentialHint}` and
+launches the runner fire-and-forget (single-active-run guard; outcome arrives over
+SSE as structured `reached-target`/`error`/`closed` events). The runner was
+refactored once to take injected `emit` + `waitForResume` + `requestCredential`
+hooks. The **Continue** button (`/resume`) releases a paused manual gate; the
+**interactive credential prompt** (`/credential`) appears when every data-box login
+fails so a typed credential can be retried.
+*Verified (5a/5b/5c):* structured command streams logs + lands on target; second
+`/run` → 409, bad flow → 400; manual-gate flow pauses until Continue; exhausting all
+logins emits `credential-prompt`, a submitted credential retries to target, cancel
+fails cleanly.
 
-**Step 6 — LLM intent layer.**
-`llm/intent.ts` calls Ollama to turn NL → `{flow, targetStep, params, dataHint}` JSON;
-wire it ahead of `/run`. Keep structured syntax as fallback.
-*Verify:* NL command (e.g. *"take me to internet checkout as a premium user"*) produces
-the right JSON and lands the browser correctly. **LLM-down test:** stop Ollama → the
-structured syntax still works.
+**Step 6 — LLM intent layer.** _(6a ✅ DONE · 6b pending)_
+`llm/intent.ts` calls Ollama to turn NL → `{flow, targetStep, credentialHint}` JSON;
+wire it ahead of `/run`. The deterministic panel form **is** the structured fallback —
+no separate text-syntax parser — so when Ollama is down the form still works.
+
+- **6a ✅ DONE.** `src/llm/intent.ts` — `parseIntent(command)` calls Ollama
+  (`qwen3.5:9B`, `format:"json"`, `temperature 0`, `think:false`). The system prompt
+  **and** the validator are both built from `listFlows()`/`targetSteps` so they can't
+  drift; `flow`+`targetStep` are hard-validated against the registry (a wrong pick is
+  rejected, never silently run); `credentialHint` is best-effort. Throws cleanly when
+  Ollama is unreachable or output is invalid. `OLLAMA_URL`/`OLLAMA_MODEL` env overrides;
+  `npm run intent -- "<command>"` CLI.
+  *Verified:* standard path → correct JSON; "by hand" → `saucedemo-manual`; nonsense →
+  rejected (exit 1); dead Ollama URL → graceful error (exit 1).
+- **6b — pending.** Add an NL command box to the panel → server calls `parseIntent` →
+  **echo the understood intent** back over SSE → run via the existing `/run`. Keep the
+  dropdown+target form as the deterministic fallback.
+  *Verify:* an NL command in the panel lands the browser; with Ollama stopped, the form
+  path still works.
 
 **Step 7 — Expand the data box.**
 Add `payments`, `addresses`, `identity` categories (test/fake data) and wire them into

@@ -17,14 +17,19 @@ const automatedLogin: FlowStep = {
   name: "login",
   description: "log in using the data box (with fallback)",
   run: async (ctx) => {
-    await loginWithFallback(ctx, {
-      usernameSelector: "#user-name",
-      passwordSelector: "#password",
-      submitSelector: "#login-button",
-      successUrl: "**/inventory.html",
-      failureSelector: '[data-test="error"]',
-      dismissErrorSelector: ".error-button",
-    });
+    const hint = ctx.params.credentialHint;
+    await loginWithFallback(
+      ctx,
+      {
+        usernameSelector: "#user-name",
+        passwordSelector: "#password",
+        submitSelector: "#login-button",
+        successUrl: "**/inventory.html",
+        failureSelector: '[data-test="error"]',
+        dismissErrorSelector: ".error-button",
+      },
+      typeof hint === "string" ? hint : undefined,
+    );
   },
 };
 
