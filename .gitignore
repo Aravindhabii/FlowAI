@@ -1,0 +1,9 @@
+# dependencies & build output
+node_modules/
+dist/
+
+# data box & auth state hold test secrets — never commit
+src/data/databox.json
+.auth/
+*storageState*.json
+.env

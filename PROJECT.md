@@ -189,4 +189,13 @@ the relevant flow steps; LLM matches labels (e.g. "declined card").
 Add the other stable flows via codegen + parameterization; expose `cart`,
 `checkout-address`, `checkout-payment` stops.
 *Verify:* each flow runs and each target stop lands on the right page.
+
+**Step 8 (optional / future) — "Record new flow" button in the dev panel.**
+Add a **Record** button to the dev panel that shells out to
+`npx playwright codegen <url>`, captures the recorded script, and helps save +
+parameterize it into a new `src/flows/*.ts` definition straight from the UI — so
+authoring a new flow doesn't require dropping to the terminal. This is the
+in-app version of the one-time authoring activity used in Steps 2 and 7.
+*Verify:* clicking **Record** opens the codegen recorder; after recording, the
+generated flow appears as a draft flow definition that can be reviewed and saved.
 ```
