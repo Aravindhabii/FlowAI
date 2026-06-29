@@ -218,7 +218,7 @@ fails so a typed credential can be retried.
 logins emits `credential-prompt`, a submitted credential retries to target, cancel
 fails cleanly.
 
-**Step 6 — LLM intent layer.** _(6a ✅ DONE · 6b pending)_
+**Step 6 — LLM intent layer.** _(6a ✅ DONE · 6b ✅ DONE)_
 `llm/intent.ts` calls Ollama to turn NL → `{flow, targetStep, credentialHint}` JSON;
 wire it ahead of `/run`. The deterministic panel form **is** the structured fallback —
 no separate text-syntax parser — so when Ollama is down the form still works.
@@ -232,11 +232,14 @@ no separate text-syntax parser — so when Ollama is down the form still works.
   `npm run intent -- "<command>"` CLI.
   *Verified:* standard path → correct JSON; "by hand" → `saucedemo-manual`; nonsense →
   rejected (exit 1); dead Ollama URL → graceful error (exit 1).
-- **6b — pending.** Add an NL command box to the panel → server calls `parseIntent` →
-  **echo the understood intent** back over SSE → run via the existing `/run`. Keep the
-  dropdown+target form as the deterministic fallback.
-  *Verify:* an NL command in the panel lands the browser; with Ollama stopped, the form
-  path still works.
+- **6b ✅ DONE.** NL command box on the panel → `POST /parse` calls `parseIntent` →
+  on success the panel **pre-fills the form with the understood intent (the echo)** and
+  fires the existing `POST /run`; on failure (Ollama down / invalid) `/parse` returns
+  502 and the panel shows "couldn't parse — use the form" with the form left enabled.
+  `/parse` is parse-only and never touches the `running` guard — `/run` stays the single
+  run mechanism and the dropdown form is an independent path (the deterministic fallback).
+  *Verified:* NL command pre-fills + lands the cart; with the Ollama **server** stopped
+  (connection refused), the form path still runs a flow.
 
 **Step 7 — Expand the data box.**
 Add `payments`, `addresses`, `identity` categories (test/fake data) and wire them into

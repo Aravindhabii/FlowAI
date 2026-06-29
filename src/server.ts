@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { runFlow, type FlowEvent } from "./runner/runFlow.js";
 import { getFlow, listFlows } from "./flows/registry.js";
 import { type Credential } from "./flows/types.js";
+import { parseIntent } from "./llm/intent.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 5179);
@@ -133,6 +134,26 @@ app.post("/run", async (req, reply) => {
     });
 
   return reply.code(202).send({ status: "started", flow: flow.name });
+});
+
+// --- LLM intent layer (Step 6b) --------------------------------------------
+// Parse-only: turn a plain-English command into the SAME structured intent the
+// form produces, then hand it back to the panel. The panel pre-fills the form
+// with it (the echo) and fires the existing /run. This stays independent of
+// /run on purpose — if Ollama is down, parseIntent throws, /parse 502s, and the
+// deterministic form path still works untouched. We do NOT set `running` here;
+// parsing is cheap, stateless, and not the run guard's concern.
+app.post("/parse", async (req, reply) => {
+  const command = String((req.body as { command?: string })?.command ?? "").trim();
+  if (!command) {
+    return reply.code(400).send({ error: "Empty command." });
+  }
+  try {
+    const intent = await parseIntent(command);
+    return reply.send(intent);
+  } catch (err) {
+    return reply.code(502).send({ error: (err as Error).message });
+  }
 });
 
 // --- panel + flow list ------------------------------------------------------

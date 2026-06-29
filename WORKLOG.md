@@ -58,9 +58,21 @@ Status legend: ✅ done & verified · 🔜 next up
   failure when Ollama is down → falls back to the deterministic panel form. Verified
   across standard / manual / nonsense / Ollama-down cases.
 
-### 🔜 Next (2026-06-29)
-- **Step 6b** — wire the intent layer into the panel (NL command box → `parseIntent`
-  → echo understood intent → existing `/run`; keep the form as fallback).
-- Then **Step 7** (expand data box: payments/addresses/identity), **Step 8** (remaining
-  real flows), **Step 9** (optional "Record new flow" button).
+## 2026-06-30 — NL box wired into the panel
+
+- **Step 6b — intent layer in the panel ✅** Added a natural-language command box
+  above the deterministic form. `POST /parse` calls `parseIntent` and returns the
+  structured intent; the panel **pre-fills the form with it (the echo)** so you see
+  exactly what was understood, then fires the existing `POST /run`. Kept the two
+  submit paths independent: the dropdown form posts straight to `/run`, and `/parse`
+  never touches the run guard. On parse failure (Ollama down / invalid) `/parse`
+  returns 502 and the panel says "couldn't parse — use the form", form left enabled.
+  Verified both cases: NL command pre-fills + lands the cart; with the Ollama **server**
+  stopped (connection refused, not just the model unloaded), the form path still runs.
+
+### 🔜 Next
+- **Step 7** — expand the data box: `payments`, `addresses`, `identity` categories
+  (test/fake data) wired into flow steps; LLM matches labels.
+- Then **Step 8** (remaining real flows + target stops), **Step 9** (optional
+  "Record new flow" button).
 - Eventually re-point at the real app/staging once reachable from the work laptop.

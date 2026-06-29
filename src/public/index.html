@@ -26,6 +26,12 @@
       }
       button:disabled { opacity: .5; cursor: not-allowed; }
       button.continue { background: #1f6feb; margin-left: 10px; }
+      #nl-form { margin-bottom: 14px; }
+      #nl { min-width: 380px; }
+      #nl-go { background: #8957e5; }
+      #nl-note { font-size: 12px; margin: 4px 0 10px; }
+      #nl-note.err { color: #f0883e; }
+      .divider { color: #8b949e; font-size: 12px; margin: 8px 0 14px; }
       .hidden { display: none !important; }
       #cred-prompt {
         display: flex; gap: 8px; align-items: center; margin: 12px 0;
@@ -51,6 +57,16 @@
       <h1>FlowAI <span>— jump to any cart/checkout step</span></h1>
     </header>
     <main>
+      <form id="nl-form">
+        <label style="flex: 1 1 100%;">tell me where to go
+          <input id="nl" placeholder='e.g. take me to the saucedemo cart as a standard user' />
+        </label>
+        <button id="nl-go" type="submit">Parse &amp; run ▸</button>
+      </form>
+      <div id="nl-note" class="hidden"></div>
+
+      <div class="divider">— or drive it manually —</div>
+
       <form id="run-form">
         <label>flow
           <select id="flow"></select>
@@ -159,15 +175,11 @@
         }
       });
 
-      document.getElementById("run-form").addEventListener("submit", async (e) => {
-        e.preventDefault();
+      // Single run mechanism, shared by the form and the NL box. Posts the
+      // structured intent to /run; the NL box just produces that intent first.
+      async function startRun(body) {
         goBtn.disabled = true;
         setStatus("running", "run");
-        const body = {
-          flow: flowSel.value,
-          targetStep: document.getElementById("target").value.trim() || undefined,
-          credentialHint: document.getElementById("hint").value.trim() || undefined,
-        };
         const res = await fetch("/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -179,6 +191,60 @@
           setStatus("rejected", "err");
           goBtn.disabled = false;
         }
+      }
+
+      document.getElementById("run-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        startRun({
+          flow: flowSel.value,
+          targetStep: document.getElementById("target").value.trim() || undefined,
+          credentialHint: document.getElementById("hint").value.trim() || undefined,
+        });
+      });
+
+      // NL path: parse to the same intent, pre-fill the form (the echo), run.
+      // Independent of the form on purpose — if Ollama is down, /parse fails,
+      // we say so and leave the form fully usable.
+      const nlInput = document.getElementById("nl");
+      const nlBtn = document.getElementById("nl-go");
+      const nlNote = document.getElementById("nl-note");
+      function showNote(text, cls) {
+        nlNote.textContent = text;
+        nlNote.className = cls || "";
+        nlNote.classList.remove("hidden");
+      }
+      document.getElementById("nl-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const command = nlInput.value.trim();
+        if (!command) return;
+        nlBtn.disabled = true;
+        showNote("understanding…", "");
+        let intent;
+        try {
+          const res = await fetch("/parse", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command }),
+          });
+          intent = await res.json();
+          if (!res.ok) throw new Error(intent.error || res.statusText);
+        } catch (err) {
+          showNote("couldn't parse (" + err.message + ") — use the form below.", "err");
+          nlBtn.disabled = false;
+          return;
+        }
+        // Pre-fill the form so the user sees exactly what was understood.
+        flowSel.value = intent.flow;
+        document.getElementById("target").value = intent.targetStep || "";
+        document.getElementById("hint").value = intent.credentialHint || "";
+        showNote("understood → " + JSON.stringify(intent), "");
+        append("🧠 understood → " + JSON.stringify(intent), "ev");
+        nlBtn.disabled = false;
+        startRun({
+          flow: intent.flow,
+          targetStep: intent.targetStep || undefined,
+          credentialHint: intent.credentialHint || undefined,
+        });
       });
     </script>
   </body>
