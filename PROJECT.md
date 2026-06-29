@@ -241,10 +241,57 @@ no separate text-syntax parser — so when Ollama is down the form still works.
   *Verified:* NL command pre-fills + lands the cart; with the Ollama **server** stopped
   (connection refused), the form path still runs a flow.
 
-**Step 7 — Expand the data box.**
-Add `payments`, `addresses`, `identity` categories (test/fake data) and wire them into
-the relevant flow steps; LLM matches labels (e.g. "declined card").
-*Verify:* a flow consumes a payment/address fixture by label.
+**Step 7 — Encrypted, demand-driven data box (capture-on-use).**
+Redesigned from the original "static fixtures" plan into a system that **captures data
+as the flow uses it, persists it encrypted, and reuses it next time**. One lifecycle,
+driven by demand:
+
+> A flow step needs `<category:label>` → in the box? **Yes** → apply it and proceed.
+> **No** → pause the flow, ask the developer, apply what they give, **persist it
+> (encrypted)**, then continue. First run populates the box; later runs reuse it.
+
+This generalizes the Step 5c credential prompt (logins only) to **any** data category
+(login, address, payment, identity).
+
+Design decisions (agreed with the user):
+- **The LLM sees labels, never values.** Secrets/PII never enter a prompt or completion.
+  The LLM only knows each flow's data *needs* and picks **by label** ("premium user" → a
+  login label, "declined card" → a payment label) — one hint channel per category,
+  mirroring `credentialHint`. The **encrypted box** holds the bytes; the **deterministic
+  runner** applies them to fields. (Local ≠ a reason to route exact secrets through a
+  stochastic text model; labels-not-values is both cleaner and strictly safer.)
+- **Encryption at rest.** `FLOWAI_KEY` (env passphrase) → scrypt → **AES-256-GCM**. The
+  key lives only in the environment, never on disk. Lost key = re-capture test data (no
+  recovery machinery).
+- **Storage = Option B, outside the repo:** `~/.flowai/databox.enc` (opaque ciphertext +
+  nonce + auth tag), path overridable via `FLOWAI_DATABOX`. Cannot be committed even if
+  `.gitignore` changes; survives re-cloning. `databox.example.json` stays **plaintext +
+  committed** as the schema doc (fake placeholders only).
+- **Scrape-capture is allowlist-only.** Only fields a flow **explicitly declares** as
+  durable+reusable are captured — never arbitrary DOM inputs. **Never persist one-time
+  codes** (OTP / CAPTCHA / MFA): single-use, so storing/replaying them is useless and
+  causes stale-token failures. Scrape feeds the encrypted box, not the LLM.
+- **Credential panel folds into one general data gate**, but the **manual login gate**
+  (CAPTCHA/MFA, human-solves-the-challenge) stays. They compose: log in by hand once →
+  durable username/password captured (not the OTP) → next run pre-fills them, human only
+  solves the live challenge. Preserve 5c's try-the-list-then-prompt fallback inside the
+  generalized gate (don't regress it).
+
+Sub-steps (one at a time, verify each gate):
+- **7a** — encrypted box foundation. Build encryption first so nothing is ever written
+  plaintext; one-time migrate the two existing fake logins; `databox.example.json` stays
+  plaintext. *Verify:* logins still resolve; the on-disk box is an opaque blob.
+- **7b** — generalized demand gate on **address**: resolve by label+fallback → if missing,
+  pause → ask → apply → persist → reuse. *Verify the full loop end-to-end without the LLM.*
+- **7c** — allowlisted scrape-capture feeding the box (excludes one-time codes).
+- **7d** — panel + LLM: the general data-prompt replaces the credential UI; LLM carries
+  per-category label hints.
+
+Note: saucedemo only has an **address-shaped** checkout form (`first`/`last`/`postal`),
+so address is the one fully-wired category now; payment/identity come online with the
+real-app flows (Step 8). Real-endpoint testing (e.g. Amazon-like) follows once reachable.
+*Verify (overall):* a flow consumes an address fixture by label; first run captures +
+persists encrypted, second run reuses from the box.
 
 **Step 8 — Encode remaining flows + target stops.**
 Add the other stable flows via codegen + parameterization; expose `cart`,
